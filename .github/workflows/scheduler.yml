@@ -1,0 +1,29 @@
+name: Daily Schedule Check
+
+on:
+  schedule:
+    # 매일 한국 시간 오전 9시 (UTC 0시) 실행
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 수동 실행 버튼 (테스트용)
+
+jobs:
+  run-scheduler:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v3
+
+      - name: 파이썬 설치
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 라이브러리 설치
+        run: |
+          pip install gspread oauth2client pandas holidays requests
+
+      - name: 알림 발송 스크립트 실행
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        run: python send_msg.py
