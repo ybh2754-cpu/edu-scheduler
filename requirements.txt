@@ -5,3 +5,5 @@ streamlit
 requests
 pandas
 holidays
+gspread
+oauth2client
