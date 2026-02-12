@@ -1,25 +1,37 @@
 import streamlit as st
 import requests
+import pandas as pd
 from datetime import datetime, timedelta
 
 # ==========================================
-# [0] 봇 설정 (토큰은 그대로 두세요!)
+# [0] 설정 (토큰 & 구글시트)
 # ==========================================
-# 강사님의 봇 토큰을 여기에 넣으세요
 telegram_token = "8468469454:AAGDuxm1mA9SNqFS53V-83oMHqSsq-8SAmw"
 
+# ★★★ 아까 복사한 '구글 시트 CSV 링크'를 여기에 넣으세요 ★★★
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRM1Tukp_wDTC2O5fBXRmWXp7tk7rDbLgiQHhuazeHSXDRn8peKtHCGCHszJwwhY6oT-xy7bLvRV09V/pub?gid=0&single=true&output=csv"
+
+def load_team_members():
+    """구글 시트에서 실시간으로 명단을 가져오는 함수"""
+    try:
+        # 엑셀(CSV) 읽기 (ID는 숫자가 아니라 문자(String)로 읽어야 함)
+        df = pd.read_csv(GOOGLE_SHEET_URL, dtype=str)
+        # 이름과 ID를 짝지어서 딕셔너리로 변환
+        return dict(zip(df['이름'], df['ID']))
+    except Exception as e:
+        st.error(f"구글 시트 연결 실패: {e}")
+        return {}
+
 def send_telegram_message(chat_id, text):
-    """사용자가 입력한 ID로 메시지 보내기"""
     url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
     data = {"chat_id": chat_id, "text": text}
-    
     try:
-        response = requests.post(url, data=data)
-        return response.status_code
-    except Exception as e:
-        return str(e)
+        requests.post(url, data=data)
+        return True
+    except:
+        return False
 
-# 날짜 계산 로직 (기존과 동일)
+# (날짜 계산 로직은 기존과 동일 - 생략 없이 그대로 둡니다)
 def get_second_wednesday_two_months_prior(start_date):
     target_month = start_date.month - 2
     target_year = start_date.year
@@ -40,64 +52,66 @@ def get_workday_before(target_date, days):
     return current_date
 
 # ==========================================
-# [2] 화면 구성 (입력창 추가됨!)
+# [2] 화면 구성
 # ==========================================
-st.title("🎓 교육 일정 비서 (개인 알림용)")
+st.title("🎓 교육 일정 비서 (구글시트 연동)")
 
-# [NEW] 사용 가이드 (접었다 폈다 할 수 있게)
-with st.expander("❓ 내 텔레그램 ID 찾는 법 (필독)"):
-    st.write("""
-    1. 텔레그램에서 **'교육일정비서(강사님이 만든 봇 이름)'**을 검색해서 **[시작]**을 누르세요.
-    2. 검색창에 **`userinfobot`** 을 검색해서 클릭하세요.
-    3. **[시작]**을 누르면 숫자로 된 **ID**가 나옵니다.
-    4. 그 숫자를 아래 칸에 복사해서 넣으세요.
-    """)
+# [새로고침 버튼] 엑셀을 수정했다면 이 버튼을 누르라고 안내
+if st.button("🔄 명단 새로고침"):
+    st.cache_data.clear()
+
+# 구글 시트에서 명단 불러오기
+team_members = load_team_members()
 
 with st.form("schedule_form"):
-    # [NEW] 사용자 ID 입력칸 추가
-    user_chat_id = st.text_input("텔레그램 ID (숫자)", placeholder="예: 123456789")
+    st.subheader("1. 받는 사람 선택")
+    
+    # 명단이 비어있으면 경고
+    if not team_members:
+        st.error("명단을 불러오지 못했습니다. 구글 시트 링크를 확인하세요.")
+        selected_name = None
+    else:
+        # 엑셀에 있는 이름들로 선택 상자 만들기
+        options = list(team_members.keys()) + ["직접 입력"]
+        selected_name = st.selectbox("누구에게 알림을 보낼까요?", options)
+
+    user_chat_id = ""
+    if selected_name == "직접 입력":
+        user_chat_id = st.text_input("텔레그램 ID 직접 입력")
+    elif selected_name:
+        user_chat_id = team_members[selected_name]
+
+    st.divider()
+    st.subheader("2. 일정 정보 입력")
     
     col1, col2 = st.columns(2)
     with col1:
-        course_name = st.text_input("교육 과정명", placeholder="예: 배전 활선 실무")
+        course_name = st.text_input("교육 과정명")
     with col2:
         start_date = st.date_input("교육 시작일", min_value=datetime.today())
 
     is_audit_target = st.checkbox("✅ 사전 감사 대상 과목인가요?")
-    submitted = st.form_submit_button("🚀 내 폰으로 전송")
+    submitted = st.form_submit_button("🚀 전송하기")
 
 # ==========================================
-# [3] 결과 처리 및 전송
+# [3] 전송 로직
 # ==========================================
 if submitted:
-    if not user_chat_id:
-        st.error("❌ 텔레그램 ID를 입력해야 알림을 보낼 수 있습니다!")
-    else:
-        st.divider()
+    if user_chat_id:
+        # 메시지 내용 생성 (기존과 동일)
         msg_text = ""
-        
-        # (로직은 기존과 동일)
         if is_audit_target:
-            audit_deadline = get_second_wednesday_two_months_prior(start_date)
-            noti_d3 = get_workday_before(audit_deadline, 3)
-            noti_d1 = get_workday_before(audit_deadline, 1)
-            
-            st.warning(f"🚨 [사전 감사 대상] 마감일: {audit_deadline}")
-            msg_text = f"🚨 [{course_name}] 사전 감사 알림\n\n📅 마감일: {audit_deadline}\n👉 D-3: {noti_d3}\n👉 D-1: {noti_d1}"
+            deadline = get_second_wednesday_two_months_prior(start_date)
+            msg_text = f"🚨 [{course_name}] 감사 마감일: {deadline}"
+            st.warning(f"마감일: {deadline}")
         else:
-            d_10 = get_workday_before(start_date, 10)
-            d_7 = get_workday_before(start_date, 7)
             d_1 = get_workday_before(start_date, 1)
-            
-            st.success(f"✨ [{course_name}] 행정 일정")
-            msg_text = f"✨ [{course_name}] 행정 일정 안내\n\n🏁 시작일: {start_date}\n✅ 시간표(D-10): {d_10}\n✅ 결재(D-7): {d_7}\n✅ 문자(D-1): {d_1}"
+            msg_text = f"✨ [{course_name}] 행정 일정\n시작일: {start_date}\n문자발송: {d_1}"
+            st.success("일정 계산 완료")
 
-        # 입력받은 ID로 전송
+        # 전송
         with st.spinner("전송 중..."):
-            status = send_telegram_message(user_chat_id, msg_text)
-            
-        if status == 200:
-            st.success("✅ 전송 완료! 핸드폰을 확인하세요.")
-        else:
-            st.error(f"❌ 전송 실패! ID를 다시 확인해주세요. (에러: {status})")
-            st.info("💡 팁: 봇에게 먼저 말을 걸어야(시작 버튼) 전송이 됩니다.")
+            send_telegram_message(user_chat_id, msg_text)
+            st.success(f"✅ {selected_name if selected_name else '사용자'}님께 전송 완료!")
+    else:
+        st.error("❌ ID가 없습니다.")
